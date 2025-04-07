@@ -20,7 +20,7 @@ def get_args():
     parser.add_argument('--experiment_name', type=str, default='default_experiment', help='Name of the experiment')
 
     # 数据集配置
-    parser.add_argument('--file_path', type=str, default='./data/FJ.csv', help='Path to dataset file')
+    parser.add_argument('--file_path', type=str, default='./data/dataForWeb.csv', help='Path to dataset file')
     parser.add_argument('--history_length', type=int, default=7, help='Historical window size')
     parser.add_argument('--prediction_length', type=int, default=7, help='Number of prediction steps')
     parser.add_argument('--target_var', type=str, default='CO_2', help='Target variable for prediction')
@@ -37,6 +37,10 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--patience', type=int, default=50, help='Early stopping patience')
 
+    # 归一化方式选择
+    parser.add_argument('--norm_method', type=str, default='z-score', choices=['min-max', 'z-score'],
+                        help="Choose normalization method: 'min-max' or 'z-score'")
+
     args = parser.parse_args()
     return args
 
@@ -44,7 +48,7 @@ def get_args():
 def main():
     args = get_args()
     dataset_name = os.path.splitext(os.path.basename(args.file_path))[0]
-    save_dir = f'./results1/{args.experiment_name}/{args.file_path.split("/")[-1].split(".")[0]}_HL{args.history_length}_PL{args.prediction_length}_{args.target_var}/'
+    save_dir = f'./results/{args.experiment_name}/{args.file_path.split("/")[-1].split(".")[0]}_HL{args.history_length}_PL{args.prediction_length}_{args.target_var}/'
     os.makedirs(save_dir, exist_ok=True)
 
     # Read dataset
@@ -55,13 +59,16 @@ def main():
                               target_var=args.target_var,
                               train_ratio=args.train_ratio,
                               val_ratio=args.val_ratio,
-                              batch_size=args.batch_size)
+                              batch_size=args.batch_size,
+                              norm_method=args.norm_method)
+
 
     train_loader, val_loader, test_loader = processor.get_dataloaders()
+    processor.save_stats_txt(os.path.join(save_dir, 'normalization_stats.txt'))
 
     # Initialize model
     print("==> Initialize model ...")
-    model = SimpleGRU(input_dim=len(args.input_var), n_steps=args.prediction_length, n_units=args.hidden_units)
+    model = SimpleLSTM(input_dim=len(args.input_var), n_steps=args.prediction_length, n_units=args.hidden_units)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     print(model)
@@ -134,6 +141,7 @@ def main():
             # plt.show()
 
     # Prediction
+    print("==> Start Predicting ...")
     model.load_state_dict(torch.load(os.path.join(save_dir, 'exp.pt')))
     model.to(device)
     model.eval()

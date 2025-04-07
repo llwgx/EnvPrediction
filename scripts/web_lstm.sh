@@ -7,7 +7,7 @@ mkdir -p experiments_logs
 EXPERIMENT_NAME="web_lstm"
 
 # 定义不同参数的范围
-HISTORY_LENGTHS=(6 12 24)
+HISTORY_LENGTHS=(6 12)
 PREDICTION_LENGTHS=(6 12)
 HIDDEN_UNITS=64  # 固定隐藏单元数
 TARGET_VARS=("IN_T" "IN_RH")

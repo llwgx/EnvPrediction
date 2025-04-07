@@ -10,7 +10,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 class DataProcessor:
     def __init__(self, file_path, windows, pred_len, input_var, target_var,
-                 train_ratio, val_ratio, batch_size, debug=False):
+                 train_ratio, val_ratio, batch_size,norm_method='min-max', debug=False):
         self.file_path = file_path
         self.windows = windows
         self.pred_len = pred_len
@@ -20,12 +20,15 @@ class DataProcessor:
         self.val_ratio = val_ratio
         self.batch_size = batch_size
         self.debug = debug
+        self.norm_method = norm_method  # 新增参数
 
         # 变量初始化
         self.train_size = None
         self.val_size = None
         self.y_train_min = None
         self.y_train_max = None
+        self.y_train_mean = None
+        self.y_train_std = None
 
     def read_data(self):
         df = pd.read_csv(self.file_path, index_col=0, parse_dates=True, nrows=250 if self.debug else None)
@@ -56,17 +59,32 @@ class DataProcessor:
         x_train, x_val, x_test = x[:train_bound], x[train_bound:val_bound], x[val_bound:]
         y_train, y_val, y_test = y[:train_bound], y[train_bound:val_bound], y[val_bound:]
 
-        # 计算训练集的最小值和最大值（避免数据泄露）
-        x_train_min, x_train_max = x_train.min(axis=0), x_train.max(axis=0)
-        self.y_train_min, self.y_train_max = y_train.min(axis=0), y_train.max(axis=0)  # 存储 y 的归一化参数
+        if self.norm_method == 'min-max':
+            # 计算训练集的最小值和最大值（避免数据泄露）
+            x_train_min, x_train_max = x_train.min(axis=0), x_train.max(axis=0)
+            self.y_train_min, self.y_train_max = y_train.min(axis=0), y_train.max(axis=0)  # 存储 y 的归一化参数
 
-        # 归一化
-        x_train = (x_train - x_train_min) / (x_train_max - x_train_min + 1e-9)
-        x_val = (x_val - x_train_min) / (x_train_max - x_train_min + 1e-9)
-        x_test = (x_test - x_train_min) / (x_train_max - x_train_min + 1e-9)
-        y_train = (y_train - self.y_train_min) / (self.y_train_max - self.y_train_min + 1e-9)
-        y_val = (y_val - self.y_train_min) / (self.y_train_max - self.y_train_min + 1e-9)
-        y_test = (y_test - self.y_train_min) / (self.y_train_max - self.y_train_min + 1e-9)
+            # 归一化
+            x_train = (x_train - x_train_min) / (x_train_max - x_train_min + 1e-9)
+            x_val = (x_val - x_train_min) / (x_train_max - x_train_min + 1e-9)
+            x_test = (x_test - x_train_min) / (x_train_max - x_train_min + 1e-9)
+            y_train = (y_train - self.y_train_min) / (self.y_train_max - self.y_train_min + 1e-9)
+            y_val = (y_val - self.y_train_min) / (self.y_train_max - self.y_train_min + 1e-9)
+            y_test = (y_test - self.y_train_min) / (self.y_train_max - self.y_train_min + 1e-9)
+        elif self.norm_method == 'z-score':
+            x_train_mean, x_train_std = x_train.mean(axis=0), x_train.std(axis=0)
+            self.y_train_mean = y_train.mean(axis=0)
+            self.y_train_std = y_train.std(axis=0)
+
+            x_train = (x_train - x_train_mean) / (x_train_std + 1e-9)
+            x_val = (x_val - x_train_mean) / (x_train_std + 1e-9)
+            x_test = (x_test - x_train_mean) / (x_train_std + 1e-9)
+            y_train = (y_train - self.y_train_mean) / (self.y_train_std + 1e-9)
+            y_val = (y_val - self.y_train_mean) / (self.y_train_std + 1e-9)
+            y_test = (y_test - self.y_train_mean) / (self.y_train_std + 1e-9)
+
+        else:
+            raise ValueError("Unsupported normalization method. Choose 'min-max' or 'z-score'.")
 
         return x_train, x_val, x_test, y_train, y_val, y_test
 
@@ -96,7 +114,35 @@ class DataProcessor:
 
     def inverse_transform_y(self, y_normalized):
         """ 反归一化目标变量 y """
-        return y_normalized * (self.y_train_max - self.y_train_min + 1e-9) + self.y_train_min
+        if self.norm_method == 'min-max':
+            return y_normalized * (self.y_train_max - self.y_train_min + 1e-9) + self.y_train_min
+        elif self.norm_method == 'z-score':
+            return y_normalized * (self.y_train_std + 1e-9) + self.y_train_mean
+        else:
+            raise ValueError("Unsupported normalization method for inverse transform.")
+
+    def save_stats_txt(self, save_path):
+        """保存归一化相关信息为纯文本格式"""
+        lines = []
+
+        lines.append(f"Normalization Method: {self.norm_method}")
+        lines.append(f"Train Size: {self.train_size}")
+        lines.append(f"Validation Size: {self.val_size}")
+        lines.append("")
+
+        if self.y_train_min is not None:
+            lines.append(f"y_train_min: {np.array2string(self.y_train_min, separator=', ')}")
+        if self.y_train_max is not None:
+            lines.append(f"y_train_max: {np.array2string(self.y_train_max, separator=', ')}")
+        if self.y_train_mean is not None:
+            lines.append(f"y_train_mean: {np.array2string(self.y_train_mean, separator=', ')}")
+        if self.y_train_std is not None:
+            lines.append(f"y_train_std: {np.array2string(self.y_train_std, separator=', ')}")
+
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+
+        print(f"Human-readable stats saved to: {save_path}")
 
 
 class PredictionEvaluator:
